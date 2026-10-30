@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Local data and research documents
+/dataset/
+/article/
+/report.pdf
+*.pdf
+
+# Experiment outputs and caches
+/results/
+/dgd_results/
+*.pkl
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
