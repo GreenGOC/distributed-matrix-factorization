@@ -41,13 +41,13 @@ def create_base_nodes(R_train, n_nodes=20, rank=10):
     
     for i, user_indices in enumerate(user_groups):
         if len(user_indices) > 0:
-            user_idx = user_indices[0]
-            node_ratings = R_train[user_idx:user_idx+1, :].copy()
+            node_ratings = R_train[user_indices, :].copy()
         else:
             node_ratings = np.full((1, n_items), np.nan)
         
         node_data = {
             'node_id': i,
+            'user_ids': user_indices.copy(),
             'user_ratings': node_ratings,
             'n_items': n_items,
             'rank': rank,
@@ -67,22 +67,20 @@ def create_node_from_data(node_data):
         rank=node_data['rank'],
         R_min=node_data['R_min'],
         R_max=node_data['R_max'],
-        use_clipping=node_data['use_clipping']
+        use_clipping=node_data['use_clipping'],
+        user_ids=node_data['user_ids']
     )
 
 def compute_test_rmse(nodes, R_test):
     test_loss = 0.0
     test_count = 0
     for node in nodes:
-        user_idx = node.node_id
-        if user_idx < R_test.shape[0]:
-            user_test_ratings = np.full((1, R_test.shape[1]), np.nan)
-            user_test_ratings[0, :] = R_test[user_idx, :]
-            node_test_loss = node.get_validation_loss(user_test_ratings)
-            n_test_ratings = np.sum(~np.isnan(user_test_ratings))
-            if n_test_ratings > 0:
-                test_loss += float(node_test_loss) * n_test_ratings
-                test_count += n_test_ratings
+        user_test_ratings = R_test[node.user_ids, :]
+        node_test_loss = node.get_validation_loss(user_test_ratings)
+        n_test_ratings = np.sum(~np.isnan(user_test_ratings))
+        if n_test_ratings > 0:
+            test_loss += float(node_test_loss) * n_test_ratings
+            test_count += n_test_ratings
     if test_count > 0:
         avg_test_loss = test_loss / test_count
         return np.sqrt(avg_test_loss)

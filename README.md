@@ -8,6 +8,8 @@ updates and lightweight defenses.
 > **Research prototype:** Attack and defense components are experimental
 > simulations, not production security controls. Results depend on random
 > initialization and are not guaranteed to be reproducible across runs.
+> Embedding clipping alone does not provide differential privacy; this project
+> does not implement a formal privacy guarantee.
 
 ## What is included
 
@@ -15,14 +17,22 @@ updates and lightweight defenses.
   training, compressed item-factor exchange, age-weighted merging, network
   churn, and complete, ring, star, or random topologies.
 - **Distributed gradient descent** (`models/dgd_local.py`): distributed
-  FedAvg, FedProx, and FedADMM experiment loops with configurable consensus
-  weights and network topologies.
+  FedAvg, FedProx, and FedADMM experiment loops, plus a DGD+LOCAL baseline.
+  For user-partitioned ratings, DGD+LOCAL keeps user factors local and applies
+  consensus to replicated item factors. The Fed-style loops are experimental
+  variants and should not be interpreted as reproductions of a paper without
+  separately validating their update rules.
 - **Attack and defense simulations** (`security/`): data poisoning, model
   manipulation, Byzantine-style updates, trust-based filtering, and
   statistical anomaly detection.
 - **Data utilities** (`data/`): MovieLens ratings loading, train/test splitting,
   and horizontal or vertical partitioning.
 - **Baseline matrix factorization** (`models/base_mf.py`).
+
+The gossip experiment assigns each node a group of users. Each user has a
+private user factor, while nodes exchange compressed item factors. The
+distributed-gradient experiments use the same user-partitioned layout, with
+local user factors and replicated item factors in the DGD+LOCAL baseline.
 
 The project is organized as follows:
 
@@ -75,14 +85,20 @@ not included in this repository.
 ## Validation
 
 GitHub Actions checks that the tracked Python modules compile on Python 3.10
-through 3.13 for pushes and pull requests. This is a syntax check, not a
-replacement for running the research experiments or validating their
-scientific results.
+through 3.13 and runs focused algorithm tests on Python 3.11 for pushes and
+pull requests. These checks do not replace running the research experiments or
+validating their scientific results.
 
 Run the same check locally from the repository root:
 
 ```bash
-python -m compileall -q data models network security test.py fl_test.py
+python -m compileall -q data models network security tests test.py fl_test.py
+```
+
+Run the focused algorithm tests with:
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
 ## Run experiments

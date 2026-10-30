@@ -19,6 +19,7 @@ class DGDLocalAlgorithm:
             'time_per_iter': [],
             'communication_rounds': []
         }
+        self.consensus_on_item_factors = False
         self.topology = self._build_topology_from_weights(weight_matrix)
         for j, node in enumerate(self.nodes):
             node.neighbours = self.topology[j]
@@ -80,6 +81,45 @@ class DGDLocalAlgorithm:
             grad_U, grad_V = node.compute_gradients()
             node.Uj -= self.step_size * grad_U
             node.Vj -= self.step_size * grad_V
+
+    def run_dgd_local_iteration(self):
+        self.consensus_on_item_factors = True
+        start_time = time.time()
+        item_factor_snapshots = [node.Vj.copy() for node in self.nodes]
+        communication_rounds = int(np.count_nonzero(self.weight_matrix) - self.J)
+        total_gradient_norm = 0.0
+
+        for node in self.nodes:
+            grad_U, grad_V = node.compute_gradients(clip_norm=False)
+            consensus_V = np.zeros_like(node.Vj)
+            for neighbour_id, neighbour_V in enumerate(item_factor_snapshots):
+                consensus_V += self.weight_matrix[node.node_id, neighbour_id] * neighbour_V
+
+            node.Uj -= self.step_size * grad_U
+            node.Vj = consensus_V - self.step_size * grad_V
+            total_gradient_norm += np.linalg.norm(grad_U) + np.linalg.norm(grad_V)
+
+        avg_gradient_norm = total_gradient_norm / self.J
+        loss = self._compute_global_loss()
+        consensus_error, U_diff = self._compute_consensus_metrics()
+        iter_time = time.time() - start_time
+        self.history['loss'].append(loss)
+        self.history['consensus_error'].append(consensus_error)
+        self.history['gradient_norm'].append(avg_gradient_norm)
+        self.history['U_diff'].append(U_diff)
+        self.history['time_per_iter'].append(iter_time)
+        self.history['communication_rounds'].append(communication_rounds)
+        self.iteration += 1
+
+        return {
+            'iteration': self.iteration,
+            'loss': loss,
+            'consensus_error': consensus_error,
+            'gradient_norm': avg_gradient_norm,
+            'U_diff': U_diff,
+            'time': iter_time,
+            'communication_rounds': communication_rounds
+        }
     
     def run_d_fedavg_iteration(self):
         start_time = time.time()
@@ -207,6 +247,10 @@ class DGDLocalAlgorithm:
         }
     
     def run_algorithm(self, algorithm='d_fedavg', convergence_tol=1e-6, max_no_improvement=50, **kwargs):
+        supported_algorithms = {'d_fedavg', 'd_fedprox', 'd_fedadmm', 'dgd_local'}
+        if algorithm not in supported_algorithms:
+            raise ValueError(f"Unknown algorithm: {algorithm}")
+        self.consensus_on_item_factors = algorithm == 'dgd_local'
         best_loss = float('inf')
         no_improvement_count = 0
         print(f"Starting {algorithm.upper()} with {self.J} nodes")
@@ -222,14 +266,15 @@ class DGDLocalAlgorithm:
                 rho = kwargs.get('rho', 0.01)
                 result = self.run_d_fedadmm_iteration(rho=rho)
             else:
-                result = self.run_d_fedavg_iteration()
-            if result['loss'] < best_loss - convergence_tol:
-                best_loss = result['loss']
-                no_improvement_count = 0
-                self.step_size *= 0.999
-            else:
-                no_improvement_count += 1
-                self.step_size *= 1.01
+                result = self.run_dgd_local_iteration()
+            if algorithm != 'dgd_local':
+                if result['loss'] < best_loss - convergence_tol:
+                    best_loss = result['loss']
+                    no_improvement_count = 0
+                    self.step_size *= 0.999
+                else:
+                    no_improvement_count += 1
+                    self.step_size *= 1.01
             print(f"Iter {self.iteration:4d} | Loss: {result['loss']:.6e} | "
                   f"Consensus: {result['consensus_error']:.3e} | "
                   f"Comm: {result['communication_rounds']}")
@@ -248,7 +293,7 @@ class DGDLocalAlgorithm:
         all_U = np.array([node.get_consensus_vector() for node in self.nodes])
         all_V = [node.Vj for node in self.nodes]
         U_mean = np.mean(all_U, axis=0)
-        V_combined = np.vstack(all_V)
+        V_combined = np.mean(all_V, axis=0) if self.consensus_on_item_factors else np.vstack(all_V)
         final_consensus_error, final_U_diff = self._compute_consensus_metrics()
         final_gradient_norm = self._compute_average_gradient_norm()
         results = {
@@ -309,7 +354,7 @@ class DGDLocalAlgorithm:
     def _compute_consensus_metrics(self):
         all_consensus = []
         for node in self.nodes:
-            all_consensus.append(node.get_consensus_vector())
+            all_consensus.append(node.Vj if self.consensus_on_item_factors else node.get_consensus_vector())
         if len(all_consensus) == 0:
             return 0.0, 0.0
         consensus_mean = np.mean(all_consensus, axis=0)
@@ -329,7 +374,7 @@ class DGDLocalAlgorithm:
     def _compute_average_gradient_norm(self):
         total_norm = 0.0
         for node in self.nodes:
-            grad_U, grad_V = node.compute_gradients()
+            grad_U, grad_V = node.compute_gradients(clip_norm=not self.consensus_on_item_factors)
             node_norm = np.linalg.norm(grad_U) + np.linalg.norm(grad_V)
             total_norm += node_norm
         return total_norm / self.J

@@ -43,9 +43,11 @@ class EmbeddingClipping:
 
 class GossipNode:
     def __init__(self, node_id: int, user_ratings: np.ndarray, n_items: int, rank: int, 
-                 R_min: float = 0.5, R_max: float = 5.0, use_clipping: bool = True):
+                 R_min: float = 0.5, R_max: float = 5.0, use_clipping: bool = True,
+                 user_ids: Optional[np.ndarray] = None):
         self.node_id = node_id
         self.user_ratings = user_ratings
+        self.user_ids = np.arange(user_ratings.shape[0]) if user_ids is None else np.asarray(user_ids)
         self.n_items = n_items
         self.rank = rank
         self.R_min = R_min
@@ -65,8 +67,8 @@ class GossipNode:
     def initialize_embeddings(self):
         scale = np.sqrt((self.R_max - self.R_min) / self.rank)
         
-        self.u = np.random.uniform(0, scale, (1, self.rank))
-        self.b = np.array([self.R_min / 2])
+        self.u = np.random.uniform(0, scale, (self.user_ratings.shape[0], self.rank))
+        self.b = np.full(self.user_ratings.shape[0], self.R_min / 2)
         
         self.Y = np.random.uniform(0, scale, (self.n_items, self.rank))
         self.c = np.full(self.n_items, self.R_min / 2)
@@ -75,11 +77,11 @@ class GossipNode:
         if self.use_clipping:
             self.u, self.Y = EmbeddingClipping.clip_embeddings(self.u, self.Y, self.R_max)
     
-    def predict(self, item_idx: int) -> float:
+    def predict(self, item_idx: int, user_idx: int = 0) -> float:
         if self.use_clipping:
             self.u, self.Y = EmbeddingClipping.clip_embeddings(self.u, self.Y, self.R_max)
         
-        prediction = float(self.u @ self.Y[item_idx].T) + self.b + self.c[item_idx]
+        prediction = float(self.u[user_idx] @ self.Y[item_idx].T) + self.b[user_idx] + self.c[item_idx]
         
         prediction = np.clip(prediction, self.R_min, self.R_max)
         
@@ -95,11 +97,10 @@ class GossipNode:
         count = 0
         
         for user_idx, item_idx in zip(user_indices, item_indices):
-            if user_idx == 0:
-                rating = self.user_ratings[user_idx, item_idx]
-                prediction = self.predict(item_idx)
-                loss += (rating - prediction) ** 2
-                count += 1
+            rating = self.user_ratings[user_idx, item_idx]
+            prediction = self.predict(item_idx, user_idx)
+            loss += (rating - prediction) ** 2
+            count += 1
         
         return loss / max(count, 1)
     
@@ -113,28 +114,27 @@ class GossipNode:
         for _ in range(n_epochs):
             indices = list(zip(user_indices, item_indices))
             random.shuffle(indices)
-            
+
             for user_idx, item_idx in indices:
-                if user_idx == 0:
-                    rating = self.user_ratings[user_idx, item_idx]
-                    prediction = self.predict(item_idx)
-                    error = rating - prediction
-                    
-                    grad_u = -2 * error * self.Y[item_idx] + lambda_reg * self.u
-                    grad_b = -2 * error + lambda_reg * self.b
-                    grad_y = (-2 * error * self.u + lambda_reg * self.Y[item_idx].reshape(1, -1)).flatten()
-                    grad_c = -2 * error + lambda_reg * self.c[item_idx]
-                    
-                    self.u -= learning_rate * grad_u
-                    self.b -= learning_rate * grad_b
-                    self.Y[item_idx] -= learning_rate * grad_y.reshape(-1)
-                    self.c[item_idx] -= learning_rate * grad_c
-                    
-                    self.t[item_idx] += 1
+                rating = self.user_ratings[user_idx, item_idx]
+                prediction = self.predict(item_idx, user_idx)
+                error = rating - prediction
+
+                grad_u = -2 * error * self.Y[item_idx] + lambda_reg * self.u[user_idx]
+                grad_b = -2 * error + lambda_reg * self.b[user_idx]
+                grad_y = -2 * error * self.u[user_idx] + lambda_reg * self.Y[item_idx]
+                grad_c = -2 * error + lambda_reg * self.c[item_idx]
+
+                self.u[user_idx] -= learning_rate * grad_u
+                self.b[user_idx] -= learning_rate * grad_b
+                self.Y[item_idx] -= learning_rate * grad_y
+                self.c[item_idx] -= learning_rate * grad_c
+
+                self.t[item_idx] += 1
             
             if self.use_clipping:
                 self.u, self.Y = EmbeddingClipping.clip_embeddings(self.u, self.Y, self.R_max)
-                
+
             learning_rate = learning_rate * 0.98
     
     def compress(self, compression_ratio: float = 0.1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -250,18 +250,16 @@ class GossipNode:
         count = 0
         
         for user_idx, item_idx in zip(user_indices, item_indices):
-            if user_idx == 0:  
-                rating = test_ratings[user_idx, item_idx]
-                prediction = self.predict(item_idx)
-                loss += (rating - prediction) ** 2
-                count += 1
+            rating = test_ratings[user_idx, item_idx]
+            prediction = self.predict(item_idx, user_idx)
+            loss += (rating - prediction) ** 2
+            count += 1
         
         return loss / max(count, 1)
     
     def get_stats(self) -> Dict[str, Any]:
         """Get node statistics"""
-        valid_indices = np.where(~np.isnan(self.user_ratings[0]))[0]
-        n_ratings = len(valid_indices)
+        n_ratings = int(np.sum(~np.isnan(self.user_ratings)))
         
         return {
             'node_id': self.node_id,

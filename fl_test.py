@@ -105,7 +105,7 @@ class DGDComprehensiveTester:
         R_train, mask_train, R_test, mask_test, n_users, n_items = self.load_movielens_data()
         nodes = self.create_dgd_nodes(R_train, n_nodes=20, rank=10)
         
-        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm']
+        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm', 'dgd_local']
         topologies = ['complete', 'ring', 'star', 'random', 'mesh']
         
         exp1_results = {}
@@ -294,10 +294,10 @@ class DGDComprehensiveTester:
         return exp3_results
     
     def plot_experiment_1(self, results):
-        fig, axes = plt.subplots(3, 3, figsize=(15, 12))
+        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm', 'dgd_local']
+        fig, axes = plt.subplots(len(algorithms), 3, figsize=(15, 4 * len(algorithms)))
         fig.suptitle('Experiment 1: Topologies Without Attack', fontsize=16, y=1.02)
         
-        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm']
         topologies = list(results.keys())
         colors = {'complete': '#1f77b4', 'ring': '#2ca02c', 'star': '#d62728', 
                  'random': '#ff7f0e', 'mesh': '#9467bd'}
@@ -404,13 +404,13 @@ class DGDComprehensiveTester:
     def plot_final_metrics_bar(self, results, filename):
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         
-        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm']
+        algorithms = ['d_fedavg', 'd_fedprox', 'd_fedadmm', 'dgd_local']
         topologies = list(results.keys())
         
         for idx, metric in enumerate(['final_loss', 'final_consensus_error', 'total_communication']):
             ax = axes[idx]
             x = np.arange(len(topologies))
-            width = 0.25
+            width = 0.2
             
             for alg_idx, algorithm in enumerate(algorithms):
                 metric_values = []
